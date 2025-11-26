@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>将棋 指し手ルーレット</title>
+<style>
+  body{font-family: system-ui, -apple-system, "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif; padding:20px; background:#f6f6f6; color:#111}
+  h1{font-size:20px;margin:0 0 12px}
+  .controls{display:flex;gap:12px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+  select,button,label{font-size:16px}
+  button{padding:8px 12px;border-radius:6px;border:1px solid #999;background:#fff;cursor:pointer}
+  .board{display:grid;grid-template-columns:repeat(10, 40px);gap:2px;background:#222;padding:6px; border-radius:8px}
+  .coord{width:40px;height:40px;display:flex;align-items:center;justify-content:center;background:#ddd;font-weight:600}
+  .cell{width:40px;height:40px;display:flex;align-items:center;justify-content:center;background:#fff;border-radius:4px;box-shadow:inset 0 -6px 0 rgba(0,0,0,0.03)}
+  .cell[data-file="odd"]{background:#fff}
+  .cell[data-file="even"]{background:#eef6ff}
+  .cell.highlight{outline:3px solid #ff8a00; transform:scale(1.06); transition:transform .12s}
+  .result{margin-top:12px;padding:12px;background:#fff;border-radius:8px;border:1px solid #e3e3e3}
+  .piece-display{font-size:28px;font-weight:700}
+  .small{font-size:13px;color:#666}
+  .options{display:flex;gap:10px;align-items:center}
+  .legend{margin-top:8px;font-size:13px;color:#444}
+  @media (max-width:520px){
+    .board{grid-template-columns:repeat(10, 32px)}
+    .coord,.cell{width:32px;height:32px}
+  }
+</style>
+</head>
+<body>
+  <h1>将棋 指し手ルーレット</h1>
+  <p>指し手に迷ったら使ってみよう</p>
+
+  <div class="controls">
+    <label>側：
+      <select id="sideSelect">
+        <option value="sente" selected>先手</option>
+        <option value="gote">後手</option>
+      </select>
+    </label>
+
+    <label>駒：
+      <select id="pieceSelect">
+        <option value="王">王</option>
+        <option value="飛">飛</option>
+        <option value="角">角</option>
+        <option value="金">金</option>
+        <option value="銀">銀</option>
+        <option value="桂">桂</option>
+        <option value="香">香</option>
+        <option value="歩">歩</option>
+      </select>
+    </label>
+
+    <div style="margin-left:auto" class="options">
+      <button id="spinBtn">ルーレットを回す</button>
+      <button id="randomAllBtn">駒＋マスランダム</button>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap">
+    <div>
+      <div class="board" id="board">
+        <div class="coord"></div>
+        <div class="coord">1</div><div class="coord">2</div><div class="coord">3</div><div class="coord">4</div><div class="coord">5</div><div class="coord">6</div><div class="coord">7</div><div class="coord">8</div><div class="coord">9</div>
+      </div>
+    </div>
+
+    <div style="min-width:220px">
+      <div class="result" id="result">
+        <div><span class="small">選択駒：</span> <span id="chosenPiece" class="piece-display">—</span></div>
+        <div style="margin-top:6px"><span class="small">選択マス：</span> <span id="chosenSquare">—</span></div>
+      </div>
+    </div>
+  </div>
+
+<script>
+  const boardEl = document.getElementById('board');
+
+  function makeBoard() {
+    for (let rank = 1; rank <= 9; rank++) {
+      const rankHeader = document.createElement('div');
+      rankHeader.className = 'coord';
+      rankHeader.textContent = rank;
+      boardEl.appendChild(rankHeader);
+
+      for (let file = 1; file <= 9; file++) {
+        const cell = document.createElement('div');
+        cell.className = 'cell';
+        cell.dataset.file = (file % 2 === 1) ? 'odd' : 'even';
+        cell.dataset.fileNum = file;
+        cell.dataset.rank = rank;
+        cell.id = `c-${file}-${rank}`;
+        boardEl.appendChild(cell);
+      }
+    }
+  }
+
+  makeBoard();
+
+  const pieceSelect = document.getElementById('pieceSelect');
+  const spinBtn = document.getElementById('spinBtn');
+  const randomAllBtn = document.getElementById('randomAllBtn');
+  const chosenPieceEl = document.getElementById('chosenPiece');
+  const chosenSquareEl = document.getElementById('chosenSquare');
+  const sideSelect = document.getElementById('sideSelect');
+
+  const PIECES = ['王','飛','角','金','銀','桂','香','歩'];
+
+  const allSquares = [];
+  for (let r=1;r<=9;r++){
+    for (let f=1;f<=9;f++){
+      allSquares.push({file:f,rank:r});
+    }
+  }
+
+  function clearHighlights(){
+    document.querySelectorAll('.cell.highlight').forEach(el=>{
+      el.classList.remove('highlight');
+    });
+  }
+
+  function canDrop(side, piece, rank){
+    if (piece === '歩' || piece === '香') {
+      if (side === 'sente') {
+        if (rank === 9) return false;
+      } else {
+        if (rank === 1) return false;
+      }
+    }
+    if (piece === '桂') {
+      if (side === 'sente') {
+        if (rank === 8 || rank === 9) return false;
+      } else {
+        if (rank === 1 || rank === 2) return false;
+      }
+    }
+    return true;
+  }
+
+  function pickSquareForPiece(side, piece){
+    const valid = allSquares.filter(s => canDrop(side, piece, s.rank));
+    if (valid.length === 0) return null;
+    return valid[Math.floor(Math.random()*valid.length)];
+  }
+
+  function showResult(piece, square){
+    clearHighlights();
+    chosenPieceEl.textContent = piece;
+    if (!square){
+      chosenSquareEl.textContent = '（打てるマスがありません）';
+      return;
+    }
+    const danMap = ["","一","二","三","四","五","六","七","八","九"];
+    const shogiNotation = `${square.file}${danMap[square.rank]}${piece}`;
+    chosenSquareEl.textContent = shogiNotation;
+    document.getElementById(`c-${square.file}-${square.rank}`).classList.add('highlight');
+  }
+
+  spinBtn.addEventListener('click', ()=>{
+    const piece = pieceSelect.value;
+    spinAnimation(piece);
+  });
+
+  randomAllBtn.addEventListener('click', ()=>{
+    const piece = PIECES[Math.floor(Math.random()*PIECES.length)];
+    pieceSelect.value = piece;
+    spinAnimation(piece);
+  });
+
+  function spinAnimation(piece){
+    const rollCount = 18;
+    let i=0;
+    const side = sideSelect.value;
+    clearHighlights();
+
+    const interval = setInterval(()=>{
+      chosenPieceEl.textContent = piece; // ←演出は固定駒だけ表示
+
+      const randomSq = allSquares[Math.floor(Math.random()*allSquares.length)];
+      clearHighlights();
+      document.getElementById(`c-${randomSq.file}-${randomSq.rank}`).classList.add('highlight');
+
+      i++;
+      if (i>=rollCount){
+        clearInterval(interval);
+        const finalSquare = pickSquareForPiece(side, piece);
+        showResult(piece, finalSquare);
+      }
+    }, 60);
+  }
+
+  showResult('—', null);
+
+  document.getElementById('board').addEventListener('click', (ev)=>{
+    const t = ev.target;
+    if (!t.classList.contains('cell')) return;
+    const file = Number(t.dataset.fileNum);
+    const rank = Number(t.dataset.rank);
+    const piece = pieceSelect.value;
+    const side = sideSelect.value;
+    if (canDrop(side, piece, rank)){
+      showResult(piece, {file,rank});
+    } else {
+      alert(`${piece}はその段に打てません（${side==='sente'?'先手':'後手'}）。`);
+    }
+  });
+</script>
+</body>
+</html>
